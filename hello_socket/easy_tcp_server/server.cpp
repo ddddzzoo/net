@@ -7,6 +7,39 @@
 const int PORT = 12345;
 const int BACKLOG = 5; // 等待队列的最大长度 超过会被服务器拒绝连接
 
+// 使用结构体模拟用户登陆请求
+// 头部
+enum CMD {
+    CMD_LOGIN,
+    CMD_LOGOUT,
+    CMD_ERROR
+};
+
+struct DataHeader {
+    short data_length; // 数据长度
+    short cmd;  // 数据作用
+};
+
+// 数据部分
+struct Login {
+    std::string username;
+    std::string password;
+};
+
+struct LoginResult {
+    int result;
+
+};
+
+struct Logout {
+    std::string username;
+};
+
+struct LogoutResult {
+    int result;
+
+};
+
 int main() {
     // 创建服务器套接字
     int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -36,21 +69,52 @@ int main() {
 
     std::cout << "Server is listening on port " << PORT << std::endl;
 
+    // 接受客户端
+    sockaddr_in clientAddr = {};
+    socklen_t clientAddrLen = sizeof(clientAddr);
+    int clientSocket = accept(serverSocket, (sockaddr *) &clientAddr, &clientAddrLen);
+    if (clientSocket == -1) {
+        std::cerr << "Accepting socket failed!" << std::endl;
+        close(serverSocket);
+        return 1;
+    }
+
+    std::cout << "New client：socket = " << clientSocket << ", IP = " << inet_ntoa(clientAddr.sin_addr) << std::endl;
+
     while (true) {
-        // 接受客户端
-        sockaddr_in clientAddr = {};
-        socklen_t clientAddrLen = sizeof(clientAddr);
-        int clientSocket = accept(serverSocket, (sockaddr *) &clientAddr, &clientAddrLen);
-        if (clientSocket == -1) {
-            std::cerr << "Accepting socket failed!" << std::endl;
-            close(serverSocket);
-            return 1;
+        DataHeader header = {};
+        // 接受客户端消息
+        int byte_len = recv(clientSocket, (char *) &header, sizeof(DataHeader), 0);
+        if (byte_len <= 0) {
+            std::cout << "Client exit!" << std::endl;
+            break;
         }
-        // 向客户端发送消息
-        std::string welcomeMsg = "Welcome to the server!";
-        send(clientSocket, welcomeMsg.c_str(), welcomeMsg.size(), 0);
-        // 关闭客户端连接
-        close(clientSocket);
+        std::cout << "CMD: " << header.cmd << " ,data length: " << header.data_length << std::endl;
+
+        switch (header.cmd) {
+            case CMD_LOGIN: {
+                Login login = {};
+                recv(clientSocket, (char *) &login, sizeof(Login), 0);
+                // 没有判断用户密码
+                LoginResult ret = {1};
+                send(clientSocket, (char *) &header, sizeof(DataHeader), 0);
+                send(clientSocket, (char *) &ret, sizeof(LoginResult), 0);
+            }
+                break;
+            case CMD_LOGOUT: {
+                Logout logout = {};
+                recv(clientSocket, (char *) &logout, sizeof(logout), 0);
+                //忽略判断用户密码是否正确的过程
+                LogoutResult ret = {1};
+                send(clientSocket, (char *) &header, sizeof(header), 0);
+                send(clientSocket, (char *) &ret, sizeof(ret), 0);
+            }
+                break;
+            default:
+                header.cmd = CMD_ERROR;
+                header.data_length = 0;
+                break;
+        }
     }
 
     // 关闭服务器 socket
