@@ -11,7 +11,9 @@ const int BACKLOG = 5; // 等待队列的最大长度 超过会被服务器拒�
 // 头部
 enum CMD {
     CMD_LOGIN,
+    CMD_LOGIN_RESULT,
     CMD_LOGOUT,
+    CMD_LOGOUT_RESULT,
     CMD_ERROR
 };
 
@@ -21,23 +23,41 @@ struct DataHeader {
 };
 
 // 数据部分
-struct Login {
+struct Login : public DataHeader {
+    Login() : DataHeader() {
+        data_length = sizeof(Login);
+        cmd = CMD_LOGIN;
+    }
+
     std::string username;
     std::string password;
 };
 
-struct LoginResult {
-    int result;
+struct LoginResult : public DataHeader {
+    LoginResult() : DataHeader(), result(0) {
+        data_length = sizeof(LoginResult);
+        cmd = CMD_LOGIN_RESULT;
+    }
 
+    int result;
 };
 
-struct Logout {
+struct Logout : public DataHeader {
+    Logout() : DataHeader() {
+        data_length = sizeof(Logout);
+        cmd = CMD_LOGOUT;
+    }
+
     std::string username;
 };
 
-struct LogoutResult {
-    int result;
+struct LogoutResult : public DataHeader {
+    LogoutResult() : DataHeader(), result(0) {
+        data_length = sizeof(LoginResult);
+        cmd = CMD_LOGOUT_RESULT;
+    }
 
+    int result;
 };
 
 int main() {
@@ -93,26 +113,25 @@ int main() {
 
         switch (header.cmd) {
             case CMD_LOGIN: {
-                Login login = {};
-                recv(clientSocket, (char *) &login, sizeof(Login), 0);
+                Login login;
+                recv(clientSocket, (char *) &login + sizeof(DataHeader), sizeof(Login), 0);
                 // 没有判断用户密码
-                LoginResult ret = {1};
-                send(clientSocket, (char *) &header, sizeof(DataHeader), 0);
+                LoginResult ret;
                 send(clientSocket, (char *) &ret, sizeof(LoginResult), 0);
             }
                 break;
             case CMD_LOGOUT: {
-                Logout logout = {};
+                Logout logout;
                 recv(clientSocket, (char *) &logout, sizeof(logout), 0);
                 //忽略判断用户密码是否正确的过程
-                LogoutResult ret = {1};
-                send(clientSocket, (char *) &header, sizeof(header), 0);
+                LogoutResult ret;
                 send(clientSocket, (char *) &ret, sizeof(ret), 0);
             }
                 break;
             default:
                 header.cmd = CMD_ERROR;
                 header.data_length = 0;
+                send(clientSocket, (char *) &header, sizeof(header), 0);
                 break;
         }
     }

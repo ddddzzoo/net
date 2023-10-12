@@ -11,7 +11,9 @@ const int SERVER_PORT = 12345;
 // 头部
 enum CMD {
     CMD_LOGIN,
+    CMD_LOGIN_RESULT,
     CMD_LOGOUT,
+    CMD_LOGOUT_RESULT,
     CMD_ERROR
 };
 
@@ -21,23 +23,41 @@ struct DataHeader {
 };
 
 // 数据部分
-struct Login {
+struct Login : public DataHeader {
+    Login() : DataHeader() {
+        data_length = sizeof(Login);
+        cmd = CMD_LOGIN;
+    }
+
     std::string username;
     std::string password;
 };
 
-struct LoginResult {
-    int result;
+struct LoginResult : public DataHeader {
+    LoginResult() : DataHeader(), result(0) {
+        data_length = sizeof(LoginResult);
+        cmd = CMD_LOGIN_RESULT;
+    }
 
+    int result;
 };
 
-struct Logout {
+struct Logout : public DataHeader {
+    Logout() : DataHeader() {
+        data_length = sizeof(Logout);
+        cmd = CMD_LOGOUT;
+    }
+
     std::string username;
 };
 
-struct LogoutResult {
-    int result;
+struct LogoutResult : public DataHeader {
+    LogoutResult() : DataHeader(), result(0) {
+        data_length = sizeof(LoginResult);
+        cmd = CMD_LOGOUT_RESULT;
+    }
 
+    int result;
 };
 
 int main() {
@@ -67,26 +87,29 @@ int main() {
         if ("exit" == cmd) {
             break;
         } else if ("login" == cmd) {
-            Login login = {"username", "password"};
+            Login login;
+            login.username = "username";
+            login.password = "password";
             DataHeader header = {sizeof(login), CMD_LOGIN};
             // 发送消息给服务器
             send(clientSocket, (const char *) &header, sizeof(header), 0);
             send(clientSocket, (const char *) &login, sizeof(login), 0);
             // 接受服务器消息
             DataHeader ret_header = {};
-            LoginResult ret = {};
+            LoginResult ret;
             recv(clientSocket, (char *) &ret_header, sizeof(ret_header), 0);
             recv(clientSocket, (char *) &ret, sizeof(ret), 0);
             std::cout << "Login result: " << ret.result << std::endl;
         } else if ("logout" == cmd) {
-            Logout logout = {"username"};
+            Logout logout;
+            logout.username = "username";
             DataHeader header = {sizeof(logout), CMD_LOGOUT};
             // 发送消息给服务器
             send(clientSocket, (const char *) &header, sizeof(header), 0);
             send(clientSocket, (const char *) &logout, sizeof(logout), 0);
             // 接受服务器消息
             DataHeader ret_header = {};
-            LogoutResult ret = {};
+            LogoutResult ret;
             recv(clientSocket, (char *) &ret_header, sizeof(ret_header), 0);
             recv(clientSocket, (char *) &ret, sizeof(ret), 0);
             std::cout << "Logout result: " << ret.result << std::endl;
