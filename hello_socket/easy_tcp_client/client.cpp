@@ -1,5 +1,6 @@
 #include <iostream>
 #include <string>
+#include <thread>
 #include <unistd.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
@@ -14,6 +15,7 @@ enum CMD {
     CMD_LOGIN_RESULT,
     CMD_LOGOUT,
     CMD_LOGOUT_RESULT,
+    CMD_NEW_USER_JOIN,
     CMD_ERROR
 };
 
@@ -60,6 +62,77 @@ struct LogoutResult : public DataHeader {
     int result;
 };
 
+struct NewUserJoin : public DataHeader {
+    NewUserJoin() : DataHeader(), socket(0) {
+        data_length = sizeof(NewUserJoin);
+        cmd = CMD_NEW_USER_JOIN;
+    }
+
+    int socket;
+};
+
+int processor(int clientSocket) {
+    // 缓冲区
+    char buffer[4096] = {};
+
+    int byte_len = static_cast<int>( recv(clientSocket, buffer, sizeof(DataHeader), 0));
+    auto *header = reinterpret_cast<DataHeader *>(buffer);
+
+    if (byte_len <= 0) {
+        std::cout << "Connection lost!" << std::endl;
+        return -1;
+    }
+
+    switch (header->cmd) {
+        case CMD_LOGIN_RESULT: {
+            recv(clientSocket, buffer + sizeof(DataHeader), header->data_length - sizeof(DataHeader), 0);
+            auto login_result = reinterpret_cast<LoginResult *>(buffer);
+            std::cout << "CMD_LOGIN_RESULT -- Data length: " << login_result->data_length;
+        }
+            break;
+        case CMD_LOGOUT_RESULT: {
+            recv(clientSocket, buffer + sizeof(DataHeader), header->data_length - sizeof(DataHeader), 0);
+            auto logout_result = reinterpret_cast<LogoutResult *>(buffer);
+            std::cout << "CMD_LOGOUT_RESULT -- Data length: " << logout_result->data_length;
+        }
+            break;
+        case CMD_NEW_USER_JOIN: {
+            recv(clientSocket, buffer + sizeof(DataHeader), header->data_length - sizeof(DataHeader), 0);
+            auto new_user_join = reinterpret_cast<NewUserJoin *>(buffer);
+            std::cout << "CMD_NEW_USER_JOIN -- Data length: " << new_user_join->data_length;
+        }
+            break;
+    }
+    return 0;
+}
+
+bool run = true;
+
+void cmd_thread(int client_socket) {
+    while (true) {
+        std::string cmd;
+        std::cin >> cmd;
+        if ("exit" == cmd) {
+            run = false;
+            std::cout << "Exit cmd thread!" << std::endl;
+            break;
+        } else if ("login" == cmd) {
+            Login login;
+            login.username = "username";
+            login.password = "password";
+            // 发送消息给服务器
+            send(client_socket, (const char *) &login, sizeof(login), 0);
+        } else if ("logout" == cmd) {
+            Logout logout;
+            logout.username = "username";
+            // 发送消息给服务器
+            send(client_socket, (const char *) &logout, sizeof(logout), 0);
+        } else {
+            std::cout << "Unknown cmd!" << std::endl;
+        }
+    }
+}
+
 int main() {
     // 创建客户端 socket
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
@@ -81,43 +154,30 @@ int main() {
         return 1;
     }
 
-    while (true) {
-        std::string cmd;
-        std::cin >> cmd;
-        if ("exit" == cmd) {
+    std::thread t1(cmd_thread, clientSocket);
+    t1.detach();
+
+    while (run) {
+        fd_set fd_read;
+        FD_ZERO(&fd_read);
+        FD_SET(clientSocket, &fd_read);
+        timeval time{1, 0};
+        int ret = select(clientSocket + 1, &fd_read, nullptr, nullptr, &time);
+
+        if (ret < 0) {
+            std::cout << "Select over!" << std::endl;
             break;
-        } else if ("login" == cmd) {
-            Login login;
-            login.username = "username";
-            login.password = "password";
-            DataHeader header = {sizeof(login), CMD_LOGIN};
-            // 发送消息给服务器
-            send(clientSocket, (const char *) &header, sizeof(header), 0);
-            send(clientSocket, (const char *) &login, sizeof(login), 0);
-            // 接受服务器消息
-            DataHeader ret_header = {};
-            LoginResult ret;
-            recv(clientSocket, (char *) &ret_header, sizeof(ret_header), 0);
-            recv(clientSocket, (char *) &ret, sizeof(ret), 0);
-            std::cout << "Login result: " << ret.result << std::endl;
-        } else if ("logout" == cmd) {
-            Logout logout;
-            logout.username = "username";
-            DataHeader header = {sizeof(logout), CMD_LOGOUT};
-            // 发送消息给服务器
-            send(clientSocket, (const char *) &header, sizeof(header), 0);
-            send(clientSocket, (const char *) &logout, sizeof(logout), 0);
-            // 接受服务器消息
-            DataHeader ret_header = {};
-            LogoutResult ret;
-            recv(clientSocket, (char *) &ret_header, sizeof(ret_header), 0);
-            recv(clientSocket, (char *) &ret, sizeof(ret), 0);
-            std::cout << "Logout result: " << ret.result << std::endl;
-        } else {
-            std::cout << "Enter exit for exit!" << std::endl;
+        }
+
+        if (FD_ISSET(clientSocket, &fd_read)) {
+            FD_CLR(clientSocket, &fd_read);
+
+            if (-1 == processor(clientSocket)) {
+                std::cout << "Select over!!" << std::endl;
+                break;
+            }
         }
     }
-
     // 关闭客户端 socket
     close(clientSocket);
 
