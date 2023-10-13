@@ -104,21 +104,21 @@ int processor(int client_socket) {
            header->data_length - sizeof(DataHeader), 0);
       auto login_result = reinterpret_cast<LoginResult*>(buffer);
       std::cout << "CMD_LOGIN_RESULT -- Data length: "
-                << login_result->data_length;
+                << login_result->data_length << std::endl;
     } break;
     case CMD_LOGOUT_RESULT: {
       recv(client_socket, buffer + sizeof(DataHeader),
            header->data_length - sizeof(DataHeader), 0);
       auto logout_result = reinterpret_cast<LogoutResult*>(buffer);
       std::cout << "CMD_LOGOUT_RESULT -- Data length: "
-                << logout_result->data_length;
+                << logout_result->data_length << std::endl;
     } break;
     case CMD_NEW_USER_JOIN: {
       recv(client_socket, buffer + sizeof(DataHeader),
            header->data_length - sizeof(DataHeader), 0);
       auto new_user_join = reinterpret_cast<NewUserJoin*>(buffer);
       std::cout << "CMD_NEW_USER_JOIN -- Data length: "
-                << new_user_join->data_length;
+                << new_user_join->data_length << std::endl;
     } break;
   }
   return 0;
@@ -181,7 +181,7 @@ int main() {
 #ifdef _WIN32
   InetPton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 #else
-  inetPton(AF_INET, SERVER_IP, &server_addr.sin_addr);
+  inet_pton(AF_INET, SERVER_IP, &server_addr.sin_addr);
 #endif  // _WIN32
 
   // 连接服务器

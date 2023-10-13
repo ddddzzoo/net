@@ -245,7 +245,7 @@ int main() {
                0);
         }
         clients.emplace_back(client_socket);
-        std::cout << "New client：socket = " << (int)client_socket
+        std::cout << "New client: socket = " << (int)client_socket
                   << ", IP = " << inet_ntoa(client_addr.sin_addr) << std::endl;
       }
     }
