@@ -1,4 +1,4 @@
-#ifndef NET_LEARN_SERVER_HPP
+﻿#ifndef NET_LEARN_SERVER_HPP
 #define NET_LEARN_SERVER_HPP
 
 #ifdef _WIN32
@@ -65,7 +65,7 @@ inline void Server::close_socket() {
     for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
       closesocket(_clients.at(i));
     }
-    closesocket(server_socket);
+    closesocket(_server_socket);
     // 清除 Windows socket环境
     WSACleanup();
 #else
@@ -78,7 +78,7 @@ inline void Server::close_socket() {
   }
 }
 
-inline int Server::init_socket() {
+inline SOCKET Server::init_socket() {
 #ifdef _WIN32
   // 初始化 Windows 套接字 DLL
   WSADATA wsa_data;
@@ -91,13 +91,13 @@ inline int Server::init_socket() {
               << std::endl;
     close_socket();
   }
-  _server_socket = socket(AF_INET, SOCK_STREAM, 0);
+  _server_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (INVALID_SOCKET == _server_socket) {
     std::cerr << "Creating socket failed!" << std::endl;
   }
   else {
-    std::cout << "Creating socket <" << _server_socket << "> success!"
-              << std::endl;
+    std::cout << "Creating socket <" << static_cast<int>(_server_socket)
+              << "> success!" << std::endl;
   }
   return _server_socket;
 }
@@ -204,7 +204,7 @@ inline bool Server::on_run() {
       FD_CLR(_server_socket, &fd_read);
       accept_client();
     }
-    for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
+    for (int i = (static_cast<int>(_clients.size()) - 1); i >= 0; --i) {
       if (FD_ISSET(_clients.at(i), &fd_read)) {
         if (-1 == receive_data(_clients.at(i))) {
           auto iter = _clients.begin() + i;
@@ -219,7 +219,7 @@ inline bool Server::on_run() {
   return false;
 }
 
-inline int Server::receive_data(int client_socket) {
+inline int Server::receive_data(SOCKET client_socket) {
   // 缓冲区
   char buffer[4096] = {};
   // 接受客户端消息
@@ -237,7 +237,7 @@ inline int Server::receive_data(int client_socket) {
   return 0;
 }
 
-inline void Server::on_net_msg(int client_socket, DataHeader* header) {
+inline void Server::on_net_msg(SOCKET client_socket, DataHeader* header) {
   switch (header->cmd) {
     case CMD_LOGIN: {
       auto login = reinterpret_cast<Login*>(header);
@@ -267,7 +267,8 @@ inline void Server::on_net_msg(int client_socket, DataHeader* header) {
   }
 }
 
-inline size_t Server::send_data(int client_socket, DataHeader* header) const {
+inline size_t Server::send_data(SOCKET client_socket,
+                                DataHeader* header) const {
   if ((is_run() && header)) {
     return send(client_socket, (const char*)header, header->data_length, 0);
   }
