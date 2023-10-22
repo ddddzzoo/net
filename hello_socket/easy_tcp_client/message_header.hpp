@@ -1,3 +1,6 @@
+#ifndef NET_LEARN_MESSAGE_HEADER_HPP
+#define NET_LEARN_MESSAGE_HEADER_HPP
+
 enum CMD {
   CMD_LOGIN,
   CMD_LOGIN_RESULT,
@@ -24,12 +27,10 @@ struct Login : public DataHeader {
 };
 
 struct LoginResult : public DataHeader {
-  LoginResult() : DataHeader(), result(0) {
+  LoginResult() : DataHeader() {
     data_length = sizeof(LoginResult);
     cmd = CMD_LOGIN_RESULT;
   }
-
-  int result;
 };
 
 struct Logout : public DataHeader {
@@ -42,19 +43,17 @@ struct Logout : public DataHeader {
 };
 
 struct LogoutResult : public DataHeader {
-  LogoutResult() : DataHeader(), result(0) {
+  LogoutResult() : DataHeader() {
     data_length = sizeof(LoginResult);
     cmd = CMD_LOGOUT_RESULT;
   }
-
-  int result;
 };
 
 struct NewUserJoin : public DataHeader {
-  NewUserJoin() : DataHeader(), socket(0) {
+  NewUserJoin() : DataHeader() {
     data_length = sizeof(NewUserJoin);
     cmd = CMD_NEW_USER_JOIN;
   }
-
-  int socket;
 };
+
+#endif  // NET_LEARN_MESSAGE_HEADER_HPP

@@ -1,5 +1,5 @@
-#ifndef _client_hpp_
-#define _client_hpp_
+#ifndef NET_LEARN_CLIENT_HPP
+#define NET_LEARN_CLIENT_HPP
 
 #ifdef _WIN32
 #ifndef WIN32_LEAN_AND_MEAN
@@ -35,10 +35,10 @@ class Client {
   void close_socket();
 
   // 发送数据
-  int send_data(DataHeader* header);
+  size_t send_data(DataHeader* header) const;
 
   // 是否在工作
-  bool is_run() { return _client_socket != INVALID_SOCKET; }
+  [[nodiscard]] bool is_run() const { return _client_socket != INVALID_SOCKET; }
 
   // 处理网络消息
   bool on_run();
@@ -48,10 +48,10 @@ class Client {
   void init_socket();
 
   // 响应网络消息
-  void on_net_msg(DataHeader* header);
+  static void on_net_msg(DataHeader* header);
 
   // 接受数据处理
-  int recv_data();
+  [[nodiscard]] int receive_data() const;
 
   SOCKET _client_socket;
 };
@@ -66,18 +66,21 @@ inline void Client::init_socket() {
   WSADATA wsa_data;
   if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
     std::cout << "WSAStartup failed!" << std::endl;
-    close_socket();
   }
 #endif  // _WIN32
 
   if (INVALID_SOCKET != _client_socket) {
-    std::cerr << "Close old connection sockect = " << _client_socket << " !"
+    std::cerr << "Close old connection socket = " << _client_socket << " !"
               << std::endl;
+    close_socket();
   }
-
   _client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
   if (INVALID_SOCKET == _client_socket) {
     std::cerr << "Creating socket failed!" << std::endl;
+  }
+  else {
+    std::cout << "Creating socket <" << _client_socket << "> success!"
+              << std::endl;
   }
 }
 
@@ -97,11 +100,17 @@ inline int Client::connect_server(const char* ip, unsigned short port) {
 #endif  // _WIN32
 
   // 连接服务器
+  std::cout << "Socket:<" << _client_socket << "> is connecting server!"
+            << std::endl;
   int ret =
       connect(_client_socket, (sockaddr*)&server_addr, sizeof(server_addr));
 
   if (SOCKET_ERROR == ret) {
     std::cerr << "Connecting socket failed!" << std::endl;
+  }
+  else {
+    std::cout << "Socket:<" << _client_socket << "> connecting server success!"
+              << std::endl;
   }
 
   return ret;
@@ -116,10 +125,11 @@ inline void Client::close_socket() {
 #else
     close(_client_socket);
 #endif  // _WIN32
+    _client_socket = INVALID_SOCKET;
   }
 }
 
-inline int Client::recv_data() {
+inline int Client::receive_data() const {
   // 缓冲区
   char buffer[4096] = {};
 
@@ -142,19 +152,21 @@ inline bool Client::on_run() {
     fd_set fd_read{};
     FD_ZERO(&fd_read);
     FD_SET(_client_socket, &fd_read);
-    timeval time{1, 0};
+    timeval time{0, 0};
     int ret = select(_client_socket + 1, &fd_read, nullptr, nullptr, &time);
 
     if (ret < 0) {
       std::cout << "Select over!" << std::endl;
+      close_socket();
       return false;
     }
 
     if (FD_ISSET(_client_socket, &fd_read)) {
       FD_CLR(_client_socket, &fd_read);
 
-      if (-1 == recv_data()) {
+      if (-1 == receive_data()) {
         std::cout << "Select over!!" << std::endl;
+        close_socket();
         return false;
       }
     }
@@ -183,11 +195,11 @@ inline void Client::on_net_msg(DataHeader* header) {
   }
 }
 
-inline int Client::send_data(DataHeader* header) {
+inline size_t Client::send_data(DataHeader* header) const {
   if (is_run() && header) {
     return send(_client_socket, (const char*)&header, header->data_length, 0);
   }
   return SOCKET_ERROR;
 }
 
-#endif
+#endif  // NET_LEARN_CLIENT_HPP
