@@ -1,4 +1,4 @@
-﻿#ifndef NET_LEARN_CLIENT_HPP
+#ifndef NET_LEARN_CLIENT_HPP
 #define NET_LEARN_CLIENT_HPP
 
 #ifdef _WIN32
