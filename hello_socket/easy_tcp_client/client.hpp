@@ -197,7 +197,7 @@ inline void Client::on_net_msg(DataHeader* header) {
 
 inline size_t Client::send_data(DataHeader* header) const {
   if (is_run() && header) {
-    return send(_client_socket, (const char*)&header, header->data_length, 0);
+    return send(_client_socket, (const char*)header, header->data_length, 0);
   }
   return SOCKET_ERROR;
 }

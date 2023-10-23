@@ -260,9 +260,8 @@ inline void Server::on_net_msg(SOCKET client_socket, DataHeader* header) {
       send(client_socket, (char*)&ret, sizeof(ret), 0);
     } break;
     default:
-      header->cmd = CMD_ERROR;
-      header->data_length = 0;
-      send(client_socket, (char*)&header, sizeof(*header), 0);
+      DataHeader data_header = {0, CMD_ERROR};
+      send(client_socket, (char*)&data_header, sizeof(data_header), 0);
       break;
   }
 }
