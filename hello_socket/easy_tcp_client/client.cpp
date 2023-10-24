@@ -5,46 +5,49 @@
 const char* SERVER_IP = "127.0.0.1";
 const int SERVER_PORT = 12345;
 
-void cmd_thread(Client* client) {
+bool g_run = true;
+void CmdThread() {
   while (true) {
     std::string cmd;
     std::cin >> cmd;
-    if ("exit" == cmd) {
-      client->close_socket();
-      std::cout << "Exit cmd thread!" << std::endl;
-      break;
-    }
-    else if ("login" == cmd) {
-      Login login;
-      login.username = "username";
-      login.password = "password";
-      // 发送消息给服务器
-      client->send_data(&login);
-    }
-    else if ("logout" == cmd) {
-      Logout logout;
-      logout.username = "username";
-      // 发送消息给服务器
-      client->send_data(&logout);
+    if (cmd == "exit") {
+      g_run = false;
+      std::cout << "Exit CmdThread!" << std::endl;
     }
     else {
-      std::cout << "Unknown cmd!" << std::endl;
+      std::cout << "Error Cmd!" << std::endl;
     }
   }
 }
 
 int main() {
-  Client client;
-  client.connect_server(SERVER_IP, SERVER_PORT);
+  const int count = FD_SETSIZE - 1;
+  Client* client[count]{};
 
-  std::thread t1(cmd_thread, &client);
-  t1.detach();
-
-  while (client.is_run()) {
-    client.on_run();
+  for (int i = 0; i < count; i++) {
+    client[i] = new Client();
   }
 
-  client.close_socket();
+  for (int i = 0; i < count; i++) {
+    client[i]->ConnectServer(SERVER_IP, SERVER_PORT);
+  }
+
+  std::thread t1(CmdThread);
+  t1.detach();
+
+  Login login;
+  login.username = "Yee";
+  login.password = "YeePWD";
+  while (g_run) {
+    for (int i = 0; i < count; i++) {
+      client[i]->SendData(&login);
+      client[i]->OnRun();
+    }
+  }
+
+  for (int i = 0; i < count; i++) {
+    client[i]->CloseSocket();
+  }
 
   std::cout << "Exit!" << std::endl;
   return 0;

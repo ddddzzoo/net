@@ -29,7 +29,7 @@ int main() {
   std::thread t1(CmdThread);
   t1.detach();
 
-  while (server.IsRun()) {
+  while (g_run) {
     server.OnRun();
   }
 

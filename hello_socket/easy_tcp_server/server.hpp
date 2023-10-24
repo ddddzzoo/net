@@ -141,11 +141,11 @@ class Server {
     }
   }
 
-  void Accept() {
+  SOCKET Accept() {
     // 接受客户端
     sockaddr_in client_addr = {};
-    int client_addr_len = sizeof(client_addr);
-    auto client_socket = INVALID_SOCKET;
+    int client_addr_len = sizeof(sockaddr_in);
+    SOCKET client_socket = INVALID_SOCKET;
 #ifdef _WIN32
     client_socket =
         accept(_server_socket, (sockaddr*)&client_socket, &client_addr_len);
@@ -158,11 +158,13 @@ class Server {
     }
     else {
       NewUserJoin new_user_join;
-      send_data_to_all(&new_user_join);
+      SendDataToAll(&new_user_join);
       _clients.emplace_back(new ClientSocket(client_socket));
       std::cout << "New client: socket = " << (int)client_socket
                 << ", IP = " << inet_ntoa(client_addr.sin_addr) << std::endl;
     }
+
+    return client_socket;
   }
 
   [[nodiscard]] bool IsRun() const { return _server_socket != INVALID_SOCKET; }
@@ -264,7 +266,7 @@ class Server {
     return SOCKET_ERROR;
   }
 
-  void send_data_to_all(DataHeader* header) {
+  void SendDataToAll(DataHeader* header) {
     for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
       SendData(_clients.at(i)->getSocket(), header);
     }
