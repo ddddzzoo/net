@@ -6,7 +6,7 @@ const int PORT = 12345;
 const int BACKLOG = 5;  // 等待队列的最大长度 超过会被服务器拒绝连接
 
 bool g_run = true;
-void CmdThread() {
+[[noreturn]] void CmdThread() {
   while (true) {
     std::string cmd;
     std::cin >> cmd;

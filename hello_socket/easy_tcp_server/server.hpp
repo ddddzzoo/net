@@ -90,7 +90,7 @@ class Server {
       WSACleanup();
 #else
       for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        close(_clients.at(i)->sockfd());
+        close(_clients.at(i)->getSocket());
       }
       // 关闭服务器 socket
       close(_server_socket);
@@ -145,7 +145,7 @@ class Server {
     // 接受客户端
     sockaddr_in client_addr = {};
     int client_addr_len = sizeof(sockaddr_in);
-    SOCKET client_socket = INVALID_SOCKET;
+    auto client_socket = INVALID_SOCKET;
 #ifdef _WIN32
     client_socket =
         accept(_server_socket, (sockaddr*)&client_socket, &client_addr_len);
@@ -206,7 +206,7 @@ class Server {
         Accept();
       }
       for (int i = (static_cast<int>(_clients.size()) - 1); i >= 0; --i) {
-        if (FD_ISSET(_clients.at(i), &fd_read)) {
+        if (FD_ISSET(_clients.at(i)->getSocket(), &fd_read)) {
           if (-1 == RcvData(_clients.at(i))) {
             auto iter = _clients.begin() + i;
             if (iter != _clients.end()) {

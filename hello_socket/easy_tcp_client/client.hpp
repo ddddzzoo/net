@@ -80,7 +80,7 @@ class Client {
   }
 
   // 发送数据
-  size_t SendData(DataHeader* header) {
+  size_t SendData(DataHeader* header) const {
     if (IsRun() && header) {
       return send(_client_socket, (const char*)header, header->data_length, 0);
     }
@@ -168,7 +168,7 @@ class Client {
                   << std::endl;
       } break;
       default: {
-        std::cout << "Unknow -- Data length: " << header->data_length
+        std::cout << "Unknown -- Data length: " << header->data_length
                   << std::endl;
       }
     }
