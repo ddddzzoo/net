@@ -1,18 +1,38 @@
 #include "server.hpp"
 
+#include <thread>
+
 const int PORT = 12345;
 const int BACKLOG = 5;  // 等待队列的最大长度 超过会被服务器拒绝连接
 
+bool g_run = true;
+void CmdThread() {
+  while (true) {
+    std::string cmd;
+    std::cin >> cmd;
+    if (cmd == "exit") {
+      g_run = false;
+      std::cout << "Exit CmdThread!" << std::endl;
+    }
+    else {
+      std::cout << "Error Cmd!" << std::endl;
+    }
+  }
+}
+
 int main() {
   Server server;
-  server.init_socket();
-  server.bind_ip_port(nullptr, PORT);
-  server.listen_port(BACKLOG);
+  server.InitSocket();
+  server.Bind(nullptr, PORT);
+  server.Listen(BACKLOG);
 
-  while (server.is_run()) {
-    server.on_run();
+  std::thread t1(CmdThread);
+  t1.detach();
+
+  while (server.IsRun()) {
+    server.OnRun();
   }
 
-  server.close_socket();
+  server.CloseSocket();
   return 0;
 }
