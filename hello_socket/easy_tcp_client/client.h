@@ -23,14 +23,35 @@
 
 #include "message_header.hpp"
 
-#ifndef RCV_BUFF_SIZE
-#define RCV_BUFF_SIZE 102400
-#endif  // !RCV_BUFF_SIZE
-
 class Client {
  public:
   Client() : _client_socket(INVALID_SOCKET) {}
   virtual ~Client() { CloseSocket(); }
+
+  // 初始化 socket
+  void InitSocket() {
+#ifdef _WIN32
+    // 初始化 Windows 套接字 DLL
+    WSADATA wsa_data;
+    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
+      std::cout << "WSAStartup failed!" << std::endl;
+    }
+#endif  // _WIN32
+
+    if (INVALID_SOCKET != _client_socket) {
+      std::cerr << "Close old connection socket = " << _client_socket << " !"
+                << std::endl;
+      CloseSocket();
+    }
+    _client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    if (INVALID_SOCKET == _client_socket) {
+      std::cerr << "Creating socket failed!" << std::endl;
+    }
+    else {
+      // std::cout << "Creating socket <" << _client_socket << "> success!" <<
+      // std::endl;
+    }
+  }
 
   // 连接服务器
   int ConnectServer(const char* ip, unsigned short port) {
@@ -58,8 +79,8 @@ class Client {
       std::cerr << "Connecting socket failed!" << std::endl;
     }
     else {
-      std::cout << "Socket:<" << _client_socket
-                << "> connecting server success!" << std::endl;
+      // std::cout << "Socket:<" << _client_socket
+      //          << "> connecting server success!" << std::endl;
     }
 
     return ret;
@@ -79,17 +100,6 @@ class Client {
     }
   }
 
-  // 发送数据
-  size_t SendData(DataHeader* header) const {
-    if (IsRun() && header) {
-      return send(_client_socket, (const char*)header, header->data_length, 0);
-    }
-    return SOCKET_ERROR;
-  }
-
-  // 是否在工作
-  [[nodiscard]] bool IsRun() const { return _client_socket != INVALID_SOCKET; }
-
   // 处理网络消息
   bool OnRun() {
     if (IsRun()) {
@@ -97,9 +107,8 @@ class Client {
       FD_ZERO(&fd_read);
       FD_SET(_client_socket, &fd_read);
       timeval time{0, 0};
-      int ret = select(_client_socket + 1, &fd_read, nullptr, nullptr, &time);
 
-      if (ret < 0) {
+      if (select(_client_socket + 1, &fd_read, nullptr, nullptr, &time) < 0) {
         std::cout << "Select over!" << std::endl;
         CloseSocket();
         return false;
@@ -108,7 +117,7 @@ class Client {
       if (FD_ISSET(_client_socket, &fd_read)) {
         FD_CLR(_client_socket, &fd_read);
 
-        if (-1 == RcvData()) {
+        if (-1 == RcvData(_client_socket)) {
           std::cout << "Select over!!" << std::endl;
           CloseSocket();
           return false;
@@ -119,65 +128,24 @@ class Client {
     return false;
   }
 
- private:
-  // 初始化 socket
-  void InitSocket() {
-#ifdef _WIN32
-    // 初始化 Windows 套接字 DLL
-    WSADATA wsa_data;
-    if (WSAStartup(MAKEWORD(2, 2), &wsa_data) != 0) {
-      std::cout << "WSAStartup failed!" << std::endl;
-    }
-#endif  // _WIN32
+  // 是否在工作
+  [[nodiscard]] bool IsRun() const { return _client_socket != INVALID_SOCKET; }
 
-    if (INVALID_SOCKET != _client_socket) {
-      std::cerr << "Close old connection socket = " << _client_socket << " !"
-                << std::endl;
-      CloseSocket();
-    }
-    _client_socket = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-    if (INVALID_SOCKET == _client_socket) {
-      std::cerr << "Creating socket failed!" << std::endl;
-    }
-    else {
-      std::cout << "Creating socket <" << _client_socket << "> success!"
-                << std::endl;
-    }
-  }
+#ifndef RCV_BUFF_SIZE
+#define RCV_BUFF_SIZE 10240
+#endif  // !RCV_BUFF_SIZE
 
-  // 响应网络消息
-  static void OnNetMsg(DataHeader* header) {
-    switch (header->cmd) {
-      case CMD_LOGIN_RESULT: {
-        auto login_result = reinterpret_cast<LoginResult*>(header);
-        std::cout << "CMD_LOGIN_RESULT -- Data length: "
-                  << login_result->data_length << std::endl;
-      } break;
-      case CMD_LOGOUT_RESULT: {
-        auto logout_result = reinterpret_cast<LogoutResult*>(header);
-        std::cout << "CMD_LOGOUT_RESULT -- Data length: "
-                  << logout_result->data_length << std::endl;
-      } break;
-      case CMD_NEW_USER_JOIN: {
-        auto new_user_join = reinterpret_cast<NewUserJoin*>(header);
-        std::cout << "CMD_NEW_USER_JOIN -- Data length: "
-                  << new_user_join->data_length << std::endl;
-      } break;
-      case CMD_ERROR: {
-        std::cout << "CMD_ERROR -- Data length: " << header->data_length
-                  << std::endl;
-      } break;
-      default: {
-        std::cout << "Unknown -- Data length: " << header->data_length
-                  << std::endl;
-      }
-    }
-  }
+  // 消息缓冲区
+  char _msgBuf[RCV_BUFF_SIZE * 10] = {};
+  // 消息缓冲区尾部位置
+  int _lastPos = 0;
+  // 接收缓冲区
+  char _buffer[RCV_BUFF_SIZE] = {};
 
   // 接受数据处理
-  [[nodiscard]] int RcvData() {
+  [[nodiscard]] int RcvData(SOCKET client_socket) {
     int byte_len =
-        static_cast<int>(recv(_client_socket, _buffer, RCV_BUFF_SIZE, 0));
+        static_cast<int>(recv(client_socket, _buffer, RCV_BUFF_SIZE, 0));
 
     if (byte_len <= 0) {
       std::cout << "Connection lost!" << std::endl;
@@ -210,14 +178,45 @@ class Client {
     return 0;
   }
 
-  SOCKET _client_socket;
+  // 响应网络消息
+  void OnNetMsg(DataHeader* header) {
+    switch (header->cmd) {
+      case CMD_LOGIN_RESULT: {
+        auto login_result = reinterpret_cast<LoginResult*>(header);
+        std::cout << "CMD_LOGIN_RESULT -- Data length: "
+                  << login_result->data_length << std::endl;
+      } break;
+      case CMD_LOGOUT_RESULT: {
+        auto logout_result = reinterpret_cast<LogoutResult*>(header);
+        std::cout << "CMD_LOGOUT_RESULT -- Data length: "
+                  << logout_result->data_length << std::endl;
+      } break;
+      case CMD_NEW_USER_JOIN: {
+        auto new_user_join = reinterpret_cast<NewUserJoin*>(header);
+        std::cout << "CMD_NEW_USER_JOIN -- Data length: "
+                  << new_user_join->data_length << std::endl;
+      } break;
+      case CMD_ERROR: {
+        std::cout << "CMD_ERROR -- Data length: " << header->data_length
+                  << std::endl;
+      } break;
+      default: {
+        std::cout << "Unknown -- Data length: " << header->data_length
+                  << std::endl;
+      }
+    }
+  }
 
-  // 消息缓冲区
-  char _msgBuf[RCV_BUFF_SIZE * 10] = {};
-  // 消息缓冲区尾部位置
-  int _lastPos = 0;
-  // 接收缓冲区
-  char _buffer[RCV_BUFF_SIZE] = {};
+  // 发送数据
+  size_t SendData(DataHeader* header) const {
+    if (IsRun() && header) {
+      return send(_client_socket, (const char*)header, header->data_length, 0);
+    }
+    return SOCKET_ERROR;
+  }
+
+ private:
+  SOCKET _client_socket;
 };
 
 #endif  // NET_LEARN_CLIENT_HPP

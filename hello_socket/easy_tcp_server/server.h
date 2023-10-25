@@ -22,9 +22,10 @@
 #include <vector>
 
 #include "message_header.hpp"
+#include "timer.h"
 
 #ifndef RCV_BUFF_SIZE
-#define RCV_BUFF_SIZE 102400
+#define RCV_BUFF_SIZE 10240
 #endif  // !RCV_BUFF_SIZE
 
 class ClientSocket {
@@ -52,7 +53,7 @@ class ClientSocket {
 
 class Server {
  public:
-  Server() : _server_socket(INVALID_SOCKET) {}
+  Server() : _server_socket(INVALID_SOCKET), _rcv_count(0) {}
   virtual ~Server() { CloseSocket(); }
 
   SOCKET InitSocket() {
@@ -77,25 +78,6 @@ class Server {
                 << "> success!" << std::endl;
     }
     return _server_socket;
-  }
-
-  void CloseSocket() {
-    if (_server_socket != INVALID_SOCKET) {
-#ifdef _WIN32
-      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        closesocket(_clients.at(i)->getSocket());
-      }
-      closesocket(_server_socket);
-      // 清除 Windows socket环境
-      WSACleanup();
-#else
-      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        close(_clients.at(i)->getSocket());
-      }
-      // 关闭服务器 socket
-      close(_server_socket);
-#endif  // _WIN32
-    }
   }
 
   int Bind(const char* ip, int port) const {
@@ -141,7 +123,7 @@ class Server {
     }
   }
 
-  SOCKET Accept() {
+  void Accept() {
     // 接受客户端
     sockaddr_in client_addr = {};
     int client_addr_len = sizeof(sockaddr_in);
@@ -157,14 +139,34 @@ class Server {
       std::cerr << "Accepting socket failed!" << std::endl;
     }
     else {
-      NewUserJoin new_user_join;
-      SendDataToAll(&new_user_join);
+      // NewUserJoin new_user_join;
+      // SendDataToAll(&new_user_join);
       _clients.emplace_back(new ClientSocket(client_socket));
-      std::cout << "New client: socket = " << (int)client_socket
-                << ", IP = " << inet_ntoa(client_addr.sin_addr) << std::endl;
+      // std::cout << "New client: socket = " << (int)client_socket
+      //          << ", IP = " << inet_ntoa(client_addr.sin_addr) << std::endl;
     }
+  }
 
-    return client_socket;
+  void CloseSocket() {
+    if (_server_socket != INVALID_SOCKET) {
+#ifdef _WIN32
+      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
+        closesocket(_clients.at(i)->getSocket());
+        delete _clients[i];
+      }
+      closesocket(_server_socket);
+      // 清除 Windows socket环境
+      WSACleanup();
+#else
+      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
+        close(_clients.at(i)->getSocket());
+        delete _clients[i];
+      }
+      // 关闭服务器 socket
+      close(_server_socket);
+#endif  // _WIN32
+      _clients.clear();
+    }
   }
 
   [[nodiscard]] bool IsRun() const { return _server_socket != INVALID_SOCKET; }
@@ -204,12 +206,14 @@ class Server {
       if (FD_ISSET(_server_socket, &fd_read)) {
         FD_CLR(_server_socket, &fd_read);
         Accept();
+        return true;
       }
       for (int i = (static_cast<int>(_clients.size()) - 1); i >= 0; --i) {
         if (FD_ISSET(_clients.at(i)->getSocket(), &fd_read)) {
           if (-1 == RcvData(_clients.at(i))) {
             auto iter = _clients.begin() + i;
             if (iter != _clients.end()) {
+              delete _clients[i];
               _clients.erase(iter);
             }
           }
@@ -259,6 +263,46 @@ class Server {
     return 0;
   }
 
+  virtual void OnNetMsg(SOCKET client_sock, DataHeader* header) {
+    _rcv_count++;
+    auto t1 = _timer.GetElapsedSeconds();
+    if (t1 >= 1.0) {
+      std::cout << "Time:" << t1 << " socket<<" << client_sock
+                << " clients:" << _clients.size() << " rcvCount:" << _rcv_count
+                << std::endl;
+      _rcv_count = 0;
+      _timer.update();
+    }
+
+    switch (header->cmd) {
+      case CMD_LOGIN: {
+        auto login = reinterpret_cast<Login*>(header);
+        // std::cout << "Login -- "
+        //           << "Socket: " << client_sock
+        //           << ", data length: " << login->data_length
+        //           << ", username: " << login->username
+        //           << ", password: " << login->password << std::endl;
+        //// 没有判断用户密码
+        // LoginResult ret;
+        // send(client_sock, (char*)&ret, sizeof(LoginResult), 0);
+      } break;
+      case CMD_LOGOUT: {
+        auto logout = reinterpret_cast<Logout*>(header);
+        // std::cout << "Logout -- "
+        //           << "Socket: " << client_sock
+        //           << ", data length: " << logout->data_length
+        //           << ", username: " << logout->username << std::endl;
+        // LogoutResult ret;
+        // send(client_sock, (char*)&ret, sizeof(ret), 0);
+      } break;
+      default:
+        std::cerr << "Error!" << std::endl;
+        // DataHeader data_header = {0, CMD_ERROR};
+        // send(client_sock, (char*)&data_header, sizeof(data_header), 0);
+        break;
+    }
+  }
+
   size_t SendData(SOCKET client_sock, DataHeader* header) const {
     if ((IsRun() && header)) {
       return send(client_sock, (const char*)header, header->data_length, 0);
@@ -273,41 +317,13 @@ class Server {
   }
 
  private:
-  virtual void OnNetMsg(SOCKET client_sock, DataHeader* header) {
-    switch (header->cmd) {
-      case CMD_LOGIN: {
-        auto login = reinterpret_cast<Login*>(header);
-        std::cout << "Login -- "
-                  << "Socket: " << client_sock
-                  << ", data length: " << login->data_length
-                  << ", username: " << login->username
-                  << ", password: " << login->password << std::endl;
-        // 没有判断用户密码
-        LoginResult ret;
-        send(client_sock, (char*)&ret, sizeof(LoginResult), 0);
-      } break;
-      case CMD_LOGOUT: {
-        auto logout = reinterpret_cast<Logout*>(header);
-        std::cout << "Logout -- "
-                  << "Socket: " << client_sock
-                  << ", data length: " << logout->data_length
-                  << ", username: " << logout->username << std::endl;
-        LogoutResult ret;
-        send(client_sock, (char*)&ret, sizeof(ret), 0);
-      } break;
-      default:
-        std::cerr << "Error!" << std::endl;
-        // DataHeader data_header = {0, CMD_ERROR};
-        // send(client_sock, (char*)&data_header, sizeof(data_header), 0);
-        break;
-    }
-  }
-
   // 缓冲区
   char buffer[RCV_BUFF_SIZE] = {};
 
   SOCKET _server_socket;
   std::vector<ClientSocket*> _clients;
+  Timer _timer;
+  int _rcv_count;
 };
 
 #endif  // NET_LEARN_SERVER_HPP
