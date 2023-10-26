@@ -25,7 +25,7 @@
 
 class Client {
  public:
-  Client() : _client_socket(INVALID_SOCKET) {}
+  Client() : _client_socket(INVALID_SOCKET), _is_connect(false) {}
   virtual ~Client() { CloseSocket(); }
 
   // 初始化 socket
@@ -70,8 +70,8 @@ class Client {
 #endif  // _WIN32
 
     // 连接服务器
-    std::cout << "Socket:<" << _client_socket << "> is connecting server!"
-              << std::endl;
+    //    std::cout << "Socket:<" << _client_socket << "> is connecting server!"
+    //              << std::endl;
     int ret =
         connect(_client_socket, (sockaddr*)&server_addr, sizeof(server_addr));
 
@@ -79,6 +79,7 @@ class Client {
       std::cerr << "Connecting socket failed!" << std::endl;
     }
     else {
+      _is_connect = true;
       // std::cout << "Socket:<" << _client_socket
       //          << "> connecting server success!" << std::endl;
     }
@@ -98,6 +99,7 @@ class Client {
 #endif  // _WIN32
       _client_socket = INVALID_SOCKET;
     }
+    _is_connect = false;
   }
 
   // 处理网络消息
@@ -129,7 +131,9 @@ class Client {
   }
 
   // 是否在工作
-  [[nodiscard]] bool IsRun() const { return _client_socket != INVALID_SOCKET; }
+  [[nodiscard]] bool IsRun() const {
+    return _client_socket != INVALID_SOCKET && _is_connect;
+  }
 
 #ifndef RCV_BUFF_SIZE
 #define RCV_BUFF_SIZE 10240
@@ -179,7 +183,7 @@ class Client {
   }
 
   // 响应网络消息
-  void OnNetMsg(DataHeader* header) {
+  static void OnNetMsg(DataHeader* header) {
     switch (header->cmd) {
       case CMD_LOGIN_RESULT: {
         auto login_result = reinterpret_cast<LoginResult*>(header);
@@ -208,15 +212,16 @@ class Client {
   }
 
   // 发送数据
-  size_t SendData(DataHeader* header) const {
+  size_t SendData(DataHeader* header, int len) const {
     if (IsRun() && header) {
-      return send(_client_socket, (const char*)header, header->data_length, 0);
+      return send(_client_socket, (const char*)header, len, 0);
     }
     return SOCKET_ERROR;
   }
 
  private:
   SOCKET _client_socket;
+  bool _is_connect;
 };
 
 #endif  // NET_LEARN_CLIENT_HPP
