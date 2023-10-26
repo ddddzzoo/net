@@ -267,7 +267,7 @@ class Server {
     _rcv_count++;
     auto t1 = _timer.GetElapsedSeconds();
     if (t1 >= 1.0) {
-      std::cout << "Time:" << t1 << " socket<<" << client_sock
+      std::cout << "Time:" << t1 << " socket:" << client_sock
                 << " clients:" << _clients.size() << " rcvCount:" << _rcv_count
                 << std::endl;
       _rcv_count = 0;
