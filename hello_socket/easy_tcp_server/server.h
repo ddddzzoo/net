@@ -19,6 +19,7 @@
 
 #include <iostream>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "message_header.hpp"
@@ -43,6 +44,14 @@ class ClientSocket {
 
   void setLastPos(int pos) { _lastPos = pos; }
 
+  int SendData(DataHeader* header) const {
+    if (header) {
+      return static_cast<int>(
+          send(_socket_fd, (const char*)header, header->data_length, 0));
+    }
+    return SOCKET_ERROR;
+  }
+
  private:
   // socket fd_set
   SOCKET _socket_fd;
@@ -51,9 +60,143 @@ class ClientSocket {
   int _lastPos;
 };
 
-class Server {
+class INetEvent {
  public:
-  Server() : _server_socket(INVALID_SOCKET), _rcv_count(0) {}
+  virtual void OnNetJoin(ClientSocket* client_socket) = 0;
+  virtual void OnNetLeave(ClientSocket* client_socket) = 0;
+  virtual void OnNetMsg(ClientSocket* client_socket, DataHeader* header) = 0;
+};
+
+class CellServer {
+ public:
+  explicit CellServer(SOCKET socket = INVALID_SOCKET)
+      : _socket(socket), _net_event(nullptr) {}
+  ~CellServer() { Close(); }
+
+  void SetEventObj(INetEvent* event) { _net_event = event; }
+
+  void Close() {
+    if (_socket != INVALID_SOCKET) {
+#ifdef _WIN32
+      for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+        closesocket(_clients[n]->getSocket());
+        delete _clients[n];
+      }
+      closesocket(_socket);
+#else
+      for (int n = (int)_clients.size() - 1; n >= 0; n--) {
+        close(_clients[n]->getSocket());
+        delete _clients[n];
+      }
+      close(_socket);
+#endif
+      _clients.clear();
+    }
+  }
+
+  [[nodiscard]] bool IsRun() const { return _socket != INVALID_SOCKET; }
+
+  bool OnRun() {
+    while (IsRun()) {
+      if (!_clients_buff.empty()) {
+        std::lock_guard<std::mutex> lock(_mutex);
+        for (auto i : _clients_buff) {
+          _clients.emplace_back(i);
+        }
+        _clients_buff.clear();
+      }
+
+      if (_clients.empty()) {
+        std::chrono::milliseconds t(1);
+        std::this_thread::sleep_for(t);
+        continue;
+      }
+
+      fd_set fd_read;
+      FD_ZERO(&fd_read);
+      SOCKET max_socket = _clients[0]->getSocket();
+      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
+        FD_SET(_clients[i]->getSocket(), &fd_read);
+        if (max_socket < _clients[i]->getSocket()) {
+          max_socket = _clients[i]->getSocket();
+        }
+      }
+
+      if (select(max_socket + 1, &fd_read, nullptr, nullptr, nullptr) < 0) {
+        printf("Select over!\n");
+        Close();
+        return false;
+      }
+      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
+        if (FD_ISSET(_clients[i]->getSocket(), &fd_read)) {
+          if (RcvData(_clients[i]) == -1) {
+            auto iter = _clients.begin() + i;
+            if (iter != _clients.end()) {
+              if (_net_event) {
+                _net_event->OnNetLeave(_clients[i]);
+              }
+              delete _clients[i];
+              _clients.erase(iter);
+            }
+          }
+        }
+      }
+    }
+    return false;
+  }
+
+  char _rcv[RCV_BUFF_SIZE] = {};
+
+  int RcvData(ClientSocket* client_socket) {
+    int len = static_cast<int>(
+        recv(client_socket->getSocket(), _rcv, RCV_BUFF_SIZE, 0));
+    if (len <= 0) {
+      return -1;
+    }
+    memcpy(client_socket->msgBuf() + client_socket->getLastPos(), _rcv, len);
+    client_socket->setLastPos(client_socket->getLastPos() + len);
+
+    while (client_socket->getLastPos() >= sizeof(DataHeader)) {
+      auto header = reinterpret_cast<DataHeader*>(client_socket->msgBuf());
+      if (client_socket->getLastPos() >= header->data_length) {
+        int size = client_socket->getLastPos() - header->data_length;
+        OnNetMsg(client_socket, header);
+        memcpy(client_socket->msgBuf(),
+               client_socket->msgBuf() + header->data_length, size);
+        client_socket->setLastPos(size);
+      }
+      else {
+        break;
+      }
+    }
+    return 0;
+  }
+
+  virtual void OnNetMsg(ClientSocket* clientSocket, DataHeader* header) {
+    _net_event->OnNetMsg(clientSocket, header);
+  }
+
+  void AddClient(ClientSocket* client_socket) {
+    std::lock_guard<std::mutex> lock(_mutex);
+    _clients_buff.emplace_back(client_socket);
+  }
+
+  void Start() { _thread = std::thread(std::mem_fn(&CellServer::OnRun), this); }
+
+  size_t GetClientCount() { return _clients.size() + _clients_buff.size(); }
+
+ private:
+  SOCKET _socket;
+  std::vector<ClientSocket*> _clients;
+  std::vector<ClientSocket*> _clients_buff;
+  std::mutex _mutex;
+  std::thread _thread;
+  INetEvent* _net_event;
+};
+
+class Server : public INetEvent {
+ public:
+  Server() : _server_socket(INVALID_SOCKET), _rcv_count(0), _client_count(0) {}
   virtual ~Server() { CloseSocket(); }
 
   SOCKET InitSocket() {
@@ -139,33 +282,39 @@ class Server {
       std::cerr << "Accepting socket failed!" << std::endl;
     }
     else {
-      // NewUserJoin new_user_join;
-      // SendDataToAll(&new_user_join);
-      _clients.emplace_back(new ClientSocket(client_socket));
-      // std::cout << "New client: socket = " << (int)client_socket
-      //          << ", IP = " << inet_ntoa(client_addr.sin_addr) << std::endl;
+      AddClientToCellServer(new ClientSocket(client_socket));
     }
   }
 
-  void CloseSocket() {
+  void AddClientToCellServer(ClientSocket* client_socket) {
+    auto min_server = _cell_servers[0];
+    for (auto item : _cell_servers) {
+      if (min_server->GetClientCount() > item->GetClientCount()) {
+        min_server = item;
+      }
+    }
+    min_server->AddClient(client_socket);
+    OnNetJoin(client_socket);
+  }
+
+  void Start(int server_count) {
+    for (int i = 0; i < server_count; ++i) {
+      auto ser = new CellServer(_server_socket);
+      ser->SetEventObj(this);
+      ser->Start();
+    }
+  }
+
+  void CloseSocket() const {
     if (_server_socket != INVALID_SOCKET) {
 #ifdef _WIN32
-      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        closesocket(_clients.at(i)->getSocket());
-        delete _clients[i];
-      }
       closesocket(_server_socket);
       // 清除 Windows socket环境
       WSACleanup();
 #else
-      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        close(_clients.at(i)->getSocket());
-        delete _clients[i];
-      }
       // 关闭服务器 socket
       close(_server_socket);
 #endif  // _WIN32
-      _clients.clear();
     }
   }
 
@@ -173,157 +322,49 @@ class Server {
 
   bool OnRun() {
     if (IsRun()) {
-      // 描述符（socket）集合
-      fd_set fd_read{};   // 可读状态文件描述符
-      fd_set fd_write{};  // 可写状态文件描述符
-      fd_set fd_exp{};    // 异常状态文件描述符
-      // 清理集合
+      TimeForMsg();
+      fd_set fd_read;
       FD_ZERO(&fd_read);
-      FD_ZERO(&fd_write);
-      FD_ZERO(&fd_exp);
-      // 将描述符加入集合
       FD_SET(_server_socket, &fd_read);
-      FD_SET(_server_socket, &fd_write);
-      FD_SET(_server_socket, &fd_exp);
-
-      SOCKET maxfd = _server_socket;
-      for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-        FD_SET(_clients.at(i)->getSocket(), &fd_read);
-        if (maxfd < _clients.at(i)->getSocket()) {
-          maxfd = _clients.at(i)->getSocket();
-        }
-      }
-
-      timeval time = {1, 0};
-      int ret = select(static_cast<int>(maxfd) + 1, &fd_read, &fd_write,
-                       &fd_exp, &time);
-      if (ret < 0) {
-        std::cout << "Select over!" << std::endl;
+      timeval t = {0, 10};
+      if (select(_server_socket + 1, &fd_read, nullptr, nullptr, &t)) {
+        printf("Select over!\n");
         CloseSocket();
         return false;
       }
-
       if (FD_ISSET(_server_socket, &fd_read)) {
         FD_CLR(_server_socket, &fd_read);
         Accept();
         return true;
-      }
-      for (int i = (static_cast<int>(_clients.size()) - 1); i >= 0; --i) {
-        if (FD_ISSET(_clients.at(i)->getSocket(), &fd_read)) {
-          if (-1 == RcvData(_clients.at(i))) {
-            auto iter = _clients.begin() + i;
-            if (iter != _clients.end()) {
-              delete _clients[i];
-              _clients.erase(iter);
-            }
-          }
-        }
       }
       return true;
     }
     return false;
   }
 
-  int RcvData(ClientSocket* client_socket) {
-    // 接受客户端消息
-    int byte_len = static_cast<int>(
-        recv(client_socket->getSocket(), buffer, RCV_BUFF_SIZE, 0));
-
-    if (byte_len <= 0) {
-      std::cout << "Client exit!" << std::endl;
-      return -1;
+  void TimeForMsg() {
+    auto t1 = _timer.GetElapsedSeconds();
+    if (t1 >= 1.0) {
+      printf("Thread:%d,time:%lf,socket:%d,client:%d,rcv_count:%d\n",
+             static_cast<int>(_cell_servers.size()), t1, _server_socket,
+             static_cast<int>(_client_count), static_cast<int>(_rcv_count));
+      _rcv_count = 0;
+      _timer.update();
     }
-
-    // 将收到的数据拷贝到消息缓冲区
-    memcpy(client_socket->msgBuf() + client_socket->getLastPos(), buffer,
-           byte_len);
-    // 消息缓冲区的数据尾部位置后移
-    client_socket->setLastPos(client_socket->getLastPos() + byte_len);
-    // 消息缓冲区的数据大于消息头DataHeader的长度
-    while (client_socket->getLastPos() >= sizeof(DataHeader)) {
-      // 获取当前消息长度
-      auto* header = reinterpret_cast<DataHeader*>(client_socket->msgBuf());
-      // 消息缓冲区数据大于消息长度
-      if (client_socket->getLastPos() >= header->data_length) {
-        // 消息缓冲区剩余未处理数据的长度
-        int size = client_socket->getLastPos() - header->data_length;
-        // 处理网络消息
-        OnNetMsg(client_socket->getSocket(), header);
-        // 将消息缓冲区剩余未处理的消息前移
-        memcpy(client_socket->msgBuf(),
-               client_socket->msgBuf() + header->data_length, size);
-        // 消息缓冲区尾部位置前移
-        client_socket->setLastPos(size);
-      }
-      else {
-        // 消息缓冲区剩余数据不够一条完整的消息
-        break;
-      }
-    }
-    return 0;
   }
 
   virtual void OnNetMsg(SOCKET client_sock, DataHeader* header) {
     _rcv_count++;
-    auto t1 = _timer.GetElapsedSeconds();
-    if (t1 >= 1.0) {
-      std::cout << "Time:" << t1 << " socket:" << client_sock
-                << " clients:" << _clients.size() << " rcvCount:" << _rcv_count
-                << std::endl;
-      _rcv_count = 0;
-      _timer.update();
-    }
-
-    switch (header->cmd) {
-      case CMD_LOGIN: {
-        auto login = reinterpret_cast<Login*>(header);
-        // std::cout << "Login -- "
-        //           << "Socket: " << client_sock
-        //           << ", data length: " << login->data_length
-        //           << ", username: " << login->username
-        //           << ", password: " << login->password << std::endl;
-        //// 没有判断用户密码
-        // LoginResult ret;
-        // send(client_sock, (char*)&ret, sizeof(LoginResult), 0);
-      } break;
-      case CMD_LOGOUT: {
-        auto logout = reinterpret_cast<Logout*>(header);
-        // std::cout << "Logout -- "
-        //           << "Socket: " << client_sock
-        //           << ", data length: " << logout->data_length
-        //           << ", username: " << logout->username << std::endl;
-        // LogoutResult ret;
-        // send(client_sock, (char*)&ret, sizeof(ret), 0);
-      } break;
-      default:
-        std::cerr << "Error!" << std::endl;
-        // DataHeader data_header = {0, CMD_ERROR};
-        // send(client_sock, (char*)&data_header, sizeof(data_header), 0);
-        break;
-    }
-  }
-
-  size_t SendData(SOCKET client_sock, DataHeader* header) const {
-    if ((IsRun() && header)) {
-      return send(client_sock, (const char*)header, header->data_length, 0);
-    }
-    return SOCKET_ERROR;
-  }
-
-  void SendDataToAll(DataHeader* header) {
-    for (int i = static_cast<int>(_clients.size()) - 1; i >= 0; --i) {
-      SendData(_clients.at(i)->getSocket(), header);
-    }
   }
 
  private:
-  // 缓冲区
-  char buffer[RCV_BUFF_SIZE] = {};
-
   SOCKET _server_socket;
-  std::vector<ClientSocket*> _clients;
+  std::vector<CellServer*> _cell_servers;
   Timer _timer;
-  int _rcv_count;
+
+ protected:
+  std::atomic_int _rcv_count;
+  std::atomic_int _client_count;
 };
 
 #endif  // NET_LEARN_SERVER_HPP
