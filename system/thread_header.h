@@ -5,6 +5,7 @@
 #include <unistd.h>
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 
 #define THREAD_ERROR_CHECK(ret, msg)                  \
