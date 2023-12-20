@@ -1,4 +1,3 @@
-
 #include "thread_header.h"
 
 int global = 10;  // 线程共享
