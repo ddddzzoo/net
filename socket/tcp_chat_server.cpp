@@ -33,23 +33,19 @@ int main() {
     perror("listen");
     return -1;
   }
-  // 接受连接，获取新的套接字描述符
-  int net_fd = accept(sock_fd, nullptr, nullptr);
-  if (net_fd == -1) {
-    perror("accept");
-    return -1;
-  }
 
   fd_set rd_set;
+  fd_set monitor_set;
+  FD_ZERO(&monitor_set);
+  FD_SET(STDIN_FILENO, &monitor_set);
+  FD_SET(sock_fd, &monitor_set);
   char buf[4096]{};
 
+  // 接受连接，获取新的套接字描述符
+  int net_fd = -1;
   while (true) {
-    // 使用select监控输入标准和网络套接字
-    FD_ZERO(&rd_set);
-    FD_SET(STDIN_FILENO, &rd_set);
-    FD_SET(net_fd, &rd_set);
-
-    select(net_fd + 1, &rd_set, nullptr, nullptr, nullptr);
+    memcpy(&rd_set, &monitor_set, sizeof(rd_set));
+    select(20, &rd_set, nullptr, nullptr, nullptr);
 
     // 标准输入就绪
     if (FD_ISSET(STDIN_FILENO, &rd_set)) {
@@ -60,6 +56,17 @@ int main() {
         send(net_fd, "chat is ending", 15, 0);
         break;
       }
+      send(net_fd, buf, strlen(buf), 0);
+    }
+
+    if (FD_ISSET(sock_fd, &rd_set)) {
+      net_fd = accept(sock_fd, nullptr, nullptr);
+      if (net_fd == -1) {
+        perror("accept");
+        return -1;
+      }
+      FD_SET(net_fd, &monitor_set);
+      puts("new connection is accept\n");
     }
 
     // 网络套接字就绪
@@ -68,8 +75,10 @@ int main() {
       ret = static_cast<int>(read(STDIN_FILENO, buf, sizeof(buf)));
       if (ret == 0) {
         // 读取到EOF
-        send(net_fd, "chat is ending", 15, 0);
-        break;
+        puts("bye bye");
+        FD_CLR(net_fd, &monitor_set);
+        net_fd = -1;
+        continue;
       }
       puts(buf);
     }
@@ -77,7 +86,6 @@ int main() {
 
   // 关闭
   close(sock_fd);
-  close(net_fd);
 
   return 0;
 }
