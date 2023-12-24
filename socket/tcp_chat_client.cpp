@@ -12,7 +12,7 @@ int main() {
   // 设置服务器地址信息
   struct sockaddr_in addr {};
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(8000);
+  addr.sin_port = htons(1234);
   addr.sin_addr.s_addr = inet_addr("127.0.0.1");
 
   // 连接到服务器
@@ -48,7 +48,7 @@ int main() {
     // 网络套接字就绪
     if (FD_ISSET(sock_fd, &rd_set)) {
       bzero(buf, sizeof(buf));
-      ret = static_cast<int>(read(STDIN_FILENO, buf, sizeof(buf)));
+      ret = static_cast<int>(recv(STDIN_FILENO, buf, sizeof(buf), 0));
       if (ret == 0) {
         // 读取到EOF
         puts("chat is end!");

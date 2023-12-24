@@ -20,7 +20,7 @@ int main() {
   // 绑定地址信息到套接字
   struct sockaddr_in addr {};
   addr.sin_family = AF_INET;
-  addr.sin_port = htons(8000);
+  addr.sin_port = htons(1234);
   addr.sin_addr.s_addr = INADDR_ANY;
   ret = bind(sock_fd, (struct sockaddr*)&addr, sizeof(addr));
   if (ret == -1) {
@@ -34,53 +34,45 @@ int main() {
     return -1;
   }
 
-  fd_set rd_set;
-  fd_set monitor_set;
+  // 创建文件描述符集合
+  fd_set rd_set;       // 单纯保存就绪的fd
+  fd_set monitor_set;  // 使用一个单独的监听集合
   FD_ZERO(&monitor_set);
   FD_SET(STDIN_FILENO, &monitor_set);
   FD_SET(sock_fd, &monitor_set);
+
   char buf[4096]{};
+  int net_fd_arr[10]{};  // 存储已连接的套接字描述符
+  int cur_conn = 0;      // 当前连接数
 
   // 接受连接，获取新的套接字描述符
-  int net_fd = -1;
   while (true) {
     memcpy(&rd_set, &monitor_set, sizeof(rd_set));
+
     select(20, &rd_set, nullptr, nullptr, nullptr);
 
-    // 标准输入就绪
-    if (FD_ISSET(STDIN_FILENO, &rd_set)) {
-      bzero(buf, sizeof(buf));
-      ret = static_cast<int>(read(STDIN_FILENO, buf, sizeof(buf)));
-      if (ret == 0) {
-        // 读取到EOF
-        send(net_fd, "chat is ending", 15, 0);
-        break;
-      }
-      send(net_fd, buf, strlen(buf), 0);
-    }
-
     if (FD_ISSET(sock_fd, &rd_set)) {
-      net_fd = accept(sock_fd, nullptr, nullptr);
-      if (net_fd == -1) {
+      net_fd_arr[cur_conn] = accept(sock_fd, nullptr, nullptr);
+      if (net_fd_arr[cur_conn] == -1) {
         perror("accept");
         return -1;
       }
-      FD_SET(net_fd, &monitor_set);
-      puts("new connection is accept\n");
+      FD_SET(net_fd_arr[cur_conn], &monitor_set);
+      printf("New connection accepted! cur conn = %d\n", cur_conn);
+      ++cur_conn;
     }
 
-    // 网络套接字就绪
-    if (FD_ISSET(net_fd, &rd_set)) {
-      bzero(buf, sizeof(buf));
-      ret = static_cast<int>(read(STDIN_FILENO, buf, sizeof(buf)));
-      if (ret == 0) {
-        // 读取到EOF
-        puts("bye bye");
-        FD_CLR(net_fd, &monitor_set);
-        net_fd = -1;
-        continue;
+    for (int i = 0; i < cur_conn; ++i) {
+      if (FD_ISSET(net_fd_arr[i], &rd_set)) {
+        bzero(buf, sizeof(buf));
+        recv(net_fd_arr[i], buf, sizeof(buf), 0);
+        for (int j = 0; j < cur_conn; ++j) {
+          if (j == i) {
+            continue;
+          }
+          send(net_fd_arr[j], buf, strlen(buf), 0);
+        }
       }
-      puts(buf);
     }
   }
 
