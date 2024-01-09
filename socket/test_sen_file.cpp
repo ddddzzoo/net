@@ -12,6 +12,10 @@
 #include <cstring>
 #include <string>
 
+#ifdef __linux__
+#include <sys/sendfile.h>
+#endif
+
 int main(int argc, char* argv[]) {
   if (argc <= 3) {
     printf("usage: %s ip_address port_number filename\n", basename(argv[0]));
@@ -48,7 +52,12 @@ int main(int argc, char* argv[]) {
     printf("errno is: %d\n", errno);
   }
   else {
+#ifdef __linux__
+    sendfile(conn_fd, file_fd, nullptr, stat_buf.st_size);
+#elif defined(__APPLE__)
     sendfile(file_fd, conn_fd, 0, &stat_buf.st_size, nullptr, 0);
+#endif
+
     close(conn_fd);
   }
 
