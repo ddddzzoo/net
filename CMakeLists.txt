@@ -3,5 +3,7 @@ project(net_learn)
 
 set(CMAKE_CXX_STANDARD 20)
 
+include_directories(${PROJECT_SOURCE_DIR})
+
 add_subdirectory(socket)
-# add_subdirectory(system)
+add_subdirectory(system)
